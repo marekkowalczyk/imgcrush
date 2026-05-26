@@ -1,0 +1,8 @@
+# Binary
+imgcrush
+
+# Test output
+testdata/output/
+
+# OS
+.DS_Store

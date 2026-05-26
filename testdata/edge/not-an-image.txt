@@ -1,0 +1,1 @@
+This is not an image. imgcrush should refuse to process it.
