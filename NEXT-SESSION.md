@@ -1,5 +1,5 @@
 # Next Session
 
-- **PNG palette optimization** — highest-value backlog item. Benchmark showed ImageOptim gets 80% on few-color PNGs where imgcrush gets 23%. Investigate `esimov/colorquant` or `delthas/octreequant` for color quantization. See RESEARCH.md section 3 and SPEC.md Priority 1.
-- **Lossless JPEG optimization** — research whether a pure-Go Huffman table optimizer or progressive JPEG encoder is feasible. Currently imgcrush has nothing for lossless JPEG. See SPEC.md Priority 2.
-- **Real-world testing** — run imgcrush on a larger batch of real photos and screenshots to build more baseline data. Use `testdata/benchmark.sh` to compare against ImageOptim.
+- **Implement metadata preservation (phase 1)** — raw byte-level splicing of JPEG APP segments (APP1/EXIF, APP1/XMP, APP2/ICC, APP13/IPTC) and PNG metadata chunks (eXIf, iCCP, iTXt, tEXt, zTXt). Add `--keep-metadata` flag. Copy segments as opaque blobs, no EXIF parsing needed. See RESEARCH.md section 5.
+- **PNG palette optimization** — still the biggest compression gap from benchmarks. Investigate `esimov/colorquant` or `delthas/octreequant` for color quantization. See RESEARCH.md section 3 and SPEC.md Priority 1.
+- **Learn Alan Barnard's Pro-Con-Cloud method** — user wanted this analysis applied but we didn't know the actual method. Research it for future use.

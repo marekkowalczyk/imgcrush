@@ -24,6 +24,9 @@ Safe by default, honest about tradeoffs, and a proper Unix citizen
     and wrong) plus jpegoptim CLI as a design model
   - Sections 1-4: Go image library research (format detection, JPEG
     and PNG compression in pure Go, library options, tradeoffs)
+  - Section 5: metadata preservation research (library landscape,
+    JPEG/PNG metadata formats, field-by-field DROP/KEEP/UPDATE
+    analysis, raw byte-level splicing design, Six Hats analysis)
   - Design implications summary
   - **Consult before making any implementation decisions** about
     encoding, metadata, library choices, or CLI design.

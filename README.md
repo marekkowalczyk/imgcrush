@@ -136,7 +136,7 @@ Unix integration, all in pure Go:
 - Directory and recursive mode
 - Parallel processing
 - Stdin/stdout pipe support
-- EXIF/ICC preservation
+- Metadata preservation (EXIF, ICC, XMP, IPTC)
 - WebP output
 
 See [SPEC.md](SPEC.md) for the full feature spec.
