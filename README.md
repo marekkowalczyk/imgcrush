@@ -24,12 +24,14 @@ imgcrush takes a different approach:
   composable with pipes and scripts.
 - **Safe by default.** Backups before overwrite, dry-run mode,
   skips files that are already well-compressed.
-- **Honest about tradeoffs.** Pure Go encoding is less efficient
-  than mozjpeg or pngquant. We say so and improve over time.
+- **Honest about tradeoffs.** imgcrush JPEG savings come from lossy
+  re-encoding, not smarter compression. ImageOptim does lossless JPEG
+  optimization — a fundamentally different operation. We say so clearly.
 
 ## Status
 
-**Work in progress.** The MVP is under active development.
+**MVP complete.** Core compression, all output modes, safety features,
+and tests are in place. See the roadmap below for what's next.
 
 ## Install
 
@@ -120,8 +122,8 @@ ratio:
 | CLI | AppleScript wrapper (fragile) | Native flags, exit codes, stdout |
 | Output options | In-place only | In-place, suffix, output directory |
 | Runs headless | No | Yes |
-| JPEG compression | Excellent (mozjpeg) | Good (Go stdlib, ~15-30% larger) |
-| PNG compression | Excellent (oxipng + zopfli) | Decent (Go stdlib, improving) |
+| JPEG approach | Lossless optimization (mozjpeg) | Lossy re-encoding (Go stdlib) |
+| PNG compression | Excellent (oxipng + pngquant) | Decent (Go stdlib, improving) |
 | Safety | Overwrites, no dry-run | Backups, dry-run, skip threshold |
 
 ## Roadmap
