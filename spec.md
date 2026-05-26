@@ -135,7 +135,19 @@ has nothing for lossless JPEG.
 - **Parallel processing**: compress multiple files concurrently (`--jobs <n>`)
 - **Resize**: `--max-width`, `--max-height`, `--scale` flags
 - **WebP output**: `--format webp` to convert and compress to WebP
-- **EXIF preservation**: `--keep-exif` to extract and re-inject EXIF/ICC
-  data (pure Go library, e.g. dsoprea/go-exif)
+- **Metadata preservation (phase 1)**: `--keep-metadata` to preserve
+  EXIF, ICC profiles, XMP, and IPTC data through compression. Uses raw
+  byte-level segment/chunk splicing — no third-party library needed.
+  Copy metadata segments as opaque blobs from original into output.
+  Some EXIF fields (compression tags, Software, DateTime) will be stale
+  but non-breaking. See RESEARCH.md section 5 for full design rationale.
+- **Metadata preservation (phase 2)**: Parse the EXIF APP1 segment to
+  drop invalid tags (compression-structural, thumbnail IFD, MakerNote,
+  ImageUniqueID) and update others (Software, DateTime). Requires a
+  minimal EXIF parser/writer. See RESEARCH.md section 5 field analysis.
+- **Granular metadata stripping**: `--strip-gps`, `--strip-exif`,
+  `--strip-private`, `--keep-icc` — per-field control for privacy and
+  selective stripping. Requires parsing individual EXIF/XMP fields.
+  See RESEARCH.md section 5 privacy analysis.
 - **Preserve timestamps**: `--keep-mtime` to preserve modification time
 - **Progress bar**: for large batches

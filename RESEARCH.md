@@ -336,6 +336,456 @@ because it's doing a more aggressive (destructive) thing.
 
 ---
 
+## 5. Metadata Preservation: Pure-Go Library Research (2026-05-26)
+
+### The problem
+
+Go's `image.Decode` → `image.Encode` pipeline discards all metadata:
+EXIF, ICC profiles, XMP, IPTC — everything except pixel data. To offer
+a `--keep-metadata` flag, imgcrush needs to extract metadata from the
+original file before compression and re-inject it into the output.
+
+### How JPEG stores metadata
+
+JPEG files store metadata in APP marker segments between SOI (Start of
+Image, `FF D8`) and SOS (Start of Scan):
+
+| Marker | Header | Content |
+|--------|--------|---------|
+| APP1 (`FFE1`) | `Exif\x00\x00` | EXIF data in TIFF format (camera, GPS, orientation, thumbnails) |
+| APP1 (`FFE1`) | `http://ns.adobe.com/xap/1.0/\x00` | XMP (XML-based metadata) |
+| APP2 (`FFE2`) | 16-byte ICC header | ICC color profile (critical for color accuracy) |
+| APP13 (`FFED`) | `Photoshop 3.0\x00` | IPTC metadata (captions, keywords, copyright) |
+
+All metadata segments appear before SOS. Each APP segment is limited
+to 64 KB (but ICC/XMP can span multiple segments).
+
+### How PNG stores metadata
+
+PNG uses typed chunks (4-char code + length + data + CRC32):
+
+| Chunk | Content |
+|-------|---------|
+| `eXIf` | EXIF data (same binary format as JPEG APP1, minus the wrapper) |
+| `iCCP` | ICC color profile (zlib-compressed) |
+| `iTXt` | UTF-8 text; XMP stored with keyword `XML:com.adobe.xmp` |
+| `tEXt` | Plain-text key-value pairs (Title, Author, etc.) |
+| `zTXt` | Compressed text (zlib-compressed tEXt) |
+
+### Pure-Go library landscape
+
+| Library | EXIF R | EXIF W | XMP R | XMP W | ICC R | ICC W | IPTC R | Maintained |
+|---------|--------|--------|-------|-------|-------|-------|--------|------------|
+| **dsoprea/go-exif v3** + go-jpeg-image-structure v2 + go-png-image-structure v2 | Yes | **Yes** | Yes | No | No | No | Yes | Dormant (2023) |
+| **bep/imagemeta** | Yes | No | Yes | No | No | No | Yes | **Active** (used by Hugo) |
+| **trimmer-io/go-xmp** | No | No | Yes | **Yes** | No | No | No | Dormant (2021) |
+| **mandykoh/prism** | No | No | No | No | Yes | No | No | Active |
+| **rwcarlsen/goexif** | Yes | No | No | No | No | No | No | Abandoned (2019) |
+| **evanoberholster/imagemeta** | Yes | No | Yes | No | No | No | No | Active |
+| **sfomuseum/go-exif-update** | No | **Yes** | No | No | No | No | No | Low (wraps dsoprea) |
+
+**Key finding:** dsoprea's ecosystem is the only pure-Go option that can
+write EXIF back into JPEG/PNG files. But it's dormant, has a complex API,
+and doesn't handle ICC or XMP writing. No single library covers all
+metadata types for both reading and writing.
+
+The Go stdlib has no metadata support and no plans to add it (proposal
+golang/go#33457 was frozen).
+
+### Design decision: raw byte-level splicing (no dependencies)
+
+Instead of depending on third-party libraries for metadata round-tripping,
+imgcrush will do raw byte-level segment/chunk copying:
+
+**For JPEG:**
+1. Scan the original file for APP marker segments (APP1, APP2, APP13)
+2. Save each metadata segment as an opaque byte blob
+3. After `jpeg.Encode` produces the compressed pixel data, construct the
+   output by writing: SOI → saved metadata segments → compressed data
+   (from SOF onward)
+
+**For PNG:**
+1. Parse the original file's chunk stream
+2. Save metadata chunks (`eXIf`, `iCCP`, `iTXt`, `tEXt`, `zTXt`) as
+   opaque byte blobs
+3. After `png.Encode`, parse the new PNG's chunks, insert saved metadata
+   chunks after IHDR, recompute CRCs
+
+**Why this approach:**
+- **Zero dependencies.** Requires only knowledge of JPEG/PNG binary
+  structure — well-documented, stable formats.
+- **Aligns with project principles.** Pure Go, no external libraries,
+  no maintenance risk from dormant third-party code.
+- **Simplest correct solution.** For "preserve everything unchanged,"
+  there's no need to parse individual EXIF tags — just copy raw bytes.
+- **Metadata that was modified by compression.** Some EXIF fields become
+  inaccurate after re-encoding (e.g., compression type, bits per sample,
+  image dimensions if resized). These specific tags should be stripped or
+  updated rather than blindly copied. The implementation should maintain
+  a list of "invalidated by re-encoding" tags.
+
+**What this doesn't cover (future work):**
+- Granular per-field control (`--strip-gps`, `--strip-exif`, `--keep-icc`).
+  These require parsing individual EXIF/XMP fields, which would warrant
+  adding dsoprea/go-exif or similar as a dependency. Defer until needed.
+- For metadata display/reporting, `bep/imagemeta` is the best option
+  (actively maintained, tested against exiftool).
+
+### Field-by-field analysis: what to DROP, KEEP, or UPDATE (2026-05-27)
+
+After lossy re-encoding (decode to pixels, re-encode at target quality),
+some metadata fields become lies. This section catalogs every relevant
+field. The raw byte-level splicing approach copies entire EXIF/XMP/ICC/IPTC
+segments as opaque blobs, so **for the MVP, field-level filtering applies
+only to the EXIF APP1 segment** (which must be partially parsed to remove
+invalid tags). XMP, ICC, and IPTC blocks are copied verbatim in phase 1.
+
+#### IFD0 encoding tags — mostly NOT PRESENT or SAFE TO KEEP
+
+ExifTool classifies many IFD0 structural tags as "Unsafe," but this is
+about TIFF files, not JPEG EXIF. In real-world JPEG files from cameras,
+most of these tags are either absent from IFD0 or unchanged by
+JPEG→JPEG re-encoding:
+
+**Not typically present in JPEG EXIF IFD0** (TIFF-specific):
+StripOffsets (0x0111), RowsPerStrip (0x0116), StripByteCounts (0x0117),
+JPEGQTables (0x0205), JPEGDCTables (0x0206), JPEGACTables (0x0207).
+These are TIFF strip-based storage tags. If encountered, drop them —
+but in practice they won't be there.
+
+**Present but unchanged by JPEG→JPEG re-encoding** (safe to KEEP):
+
+| Tag | ID | IFD | Why keep |
+|-----|----|-----|----------|
+| Compression | 0x0103 | IFD0 | Stays "JPEG" for JPEG→JPEG. Rarely in IFD0 anyway (usually IFD1 only). |
+| BitsPerSample | 0x0102 | IFD0 | Stays 8. Go's encoder outputs 8-bit. |
+| SamplesPerPixel | 0x0115 | IFD0 | Stays 3. Unchanged. |
+| PhotometricInterpretation | 0x0106 | IFD0 | Stays YCbCr for JPEG. Unchanged. |
+| YCbCrPositioning | 0x0213 | IFD0 | Informational in EXIF — JPEG markers control actual positioning, not this tag. Written by almost all cameras. Safe to keep. |
+| YCbCrCoefficients | 0x0211 | IFD0 | Standard Rec.601 coefficients. Unchanged. |
+| ReferenceBlackWhite | 0x0214 | IFD0 | Standard reference values. Unchanged. |
+
+**Genuinely problematic** (DROP if present in IFD0):
+
+| Tag | ID | IFD | Why drop |
+|-----|----|-----|----------|
+| JPEGInterchangeFormat | 0x0201 | IFD0 | Absolute byte offset pointer. Invalid in new file. But almost always in IFD1 only — covered by thumbnail drop below. |
+| JPEGInterchangeFormatLength | 0x0202 | IFD0 | Paired with above. Same caveat. |
+| YCbCrSubSampling | 0x0212 | IFD0 | Go's JPEG encoder may use different chroma subsampling than the original. Drop if present to avoid mismatch. |
+
+**Bottom line:** The original DROP list of 16 tags was overly aggressive.
+Most are either not present in JPEG EXIF, only in IFD1 (dropped with
+thumbnail), or unchanged by re-encoding. The actual risk is small.
+
+#### Thumbnail (IFD1) — DROP entirely
+
+IFD1 contains a thumbnail JPEG (~160×120) plus its own structural tags
+(Compression, ImageWidth, JPEGInterchangeFormat, etc.). The thumbnail
+depicts the original encoding; offset pointers are invalid in the new
+file. Drop the entire IFD1. Thumbnail regeneration is possible but
+unnecessary for MVP.
+
+Reference: jpegtran copies thumbnails verbatim with `-copy all`, but
+jpegtran is lossless. Lossy re-encoding could produce visible
+differences between thumbnail and main image.
+
+#### Image identity — DROP
+
+| Tag | ID | IFD | Why drop |
+|-----|----|-----|----------|
+| ImageUniqueID | 0xA420 | ExifIFD | 128-bit identifier for the original image. After lossy re-encoding, pixel data has changed — this is a different image. |
+
+#### MakerNote — DROP (MVP)
+
+| Tag | ID | IFD | Why drop |
+|-----|----|-----|----------|
+| MakerNote | 0x927C | ExifIFD | Opaque binary blob with manufacturer-specific internal structure. Many brands (Nikon, Panasonic, Leica) use absolute byte offsets that break when the EXIF block is relocated. ExifTool has 20+ years of brand-specific fixup code for this. A pure-Go tool cannot safely relocate MakerNotes without per-brand logic. Low value for imgcrush's use case. |
+
+MakerNote is the highest-risk metadata to copy and the single most
+common cause of corrupted metadata in image processing tools.
+
+#### Software identification — UPDATE
+
+| Tag | ID | IFD | Action |
+|-----|----|-----|--------|
+| Software | 0x0131 | IFD0 | Set to `"imgcrush <version>"`. Standard practice. |
+| ProcessingSoftware | 0x000B | IFD0 | Set to `"imgcrush <version>"`. |
+
+#### Modification timestamp — UPDATE
+
+| Tag | ID | IFD | Action |
+|-----|----|-----|--------|
+| DateTime | 0x0132 | IFD0 | Set to current time. This is the file modification date. |
+| SubSecTime | 0x9290 | ExifIFD | Update to match new DateTime. |
+| OffsetTime | 0x9010 | ExifIFD | Update timezone for new DateTime. |
+
+#### Image dimensions — KEEP (update if resizing is added)
+
+| Tag | ID | IFD | Notes |
+|-----|----|-----|-------|
+| ImageWidth | 0x0100 | IFD0 | imgcrush does not resize; dimensions unchanged. |
+| ImageLength | 0x0101 | IFD0 | Same. |
+| PixelXDimension | 0xA002 | ExifIFD | Same. |
+| PixelYDimension | 0xA003 | ExifIFD | Same. |
+
+If resizing is added later, these must be updated to match the output.
+
+#### Orientation — KEEP (special case)
+
+| Tag | ID | IFD | Notes |
+|-----|----|-----|-------|
+| Orientation | 0x0112 | IFD0 | Go's `image/jpeg` Decode does NOT apply the Orientation tag — pixels are returned as stored. Since imgcrush does not rotate, the original Orientation value remains correct. If auto-orient is ever added (rotate pixels to match tag), update to 1 (Normal). |
+
+#### Camera/shooting data — KEEP all
+
+All ExifIFD shooting tags describe the original capture, unrelated to
+encoding: Make (0x010F), Model (0x0110), ExposureTime (0x829A),
+FNumber (0x829D), ISOSpeedRatings (0x8827), FocalLength (0x920A),
+Flash (0x9209), LensMake (0xA433), LensModel (0xA434), WhiteBalance
+(0xA403), SceneCaptureType (0xA406), ExifVersion (0x9000), and all
+other ExifIFD tags not listed above.
+
+#### GPS data — KEEP all
+
+All GPS IFD tags (GPSLatitude 0x0002, GPSLongitude 0x0004, GPSAltitude
+0x0006, GPSTimeStamp 0x0007, GPSDateStamp 0x001D, etc.) describe where
+the photo was taken, not how it was encoded.
+
+**Privacy note:** GPS is the highest privacy risk in metadata. imgcrush
+should offer `--strip-gps` (future), but default to keeping it — a
+compression tool should not silently strip data the user didn't ask to
+remove.
+
+#### Original timestamps — KEEP
+
+| Tag | ID | IFD | Notes |
+|-----|----|-----|-------|
+| DateTimeOriginal | 0x9003 | ExifIFD | When the photo was taken. Never modify. |
+| SubSecTimeOriginal | 0x9291 | ExifIFD | Fractional seconds. |
+| DateTimeDigitized | 0x9004 | ExifIFD | When the image was digitized. Still true. |
+| SubSecTimeDigitized | 0x9292 | ExifIFD | Fractional seconds. |
+| OffsetTimeOriginal | 0x9011 | ExifIFD | Timezone for original. |
+| OffsetTimeDigitized | 0x9012 | ExifIFD | Timezone for digitized. |
+
+#### Copyright/authorship — KEEP all
+
+Artist (0x013B), Copyright (0x8298), ImageDescription (0x010E),
+UserComment (0x9286). Stripping copyright is legally problematic in
+some jurisdictions. All descriptive, unrelated to encoding.
+
+#### Color space — KEEP all
+
+ColorSpace (0xA001), Gamma (0xA500), WhitePoint (0x013E),
+PrimaryChromaticities (0x013F), TransferFunction (0x012D). Go's
+decoder does not perform color space conversion — output pixels are
+in the same color space as input. These remain correct.
+
+#### ICC profile (APP2) — KEEP
+
+The ICC profile describes the color space of the pixel data. Since Go
+does not perform color management, the output remains in the same color
+space. Dropping the ICC profile would cause wide-gamut images (AdobeRGB,
+Display P3) to be misinterpreted as sRGB, producing wrong colors.
+
+Copy the entire APP2 ICC segment verbatim.
+
+#### XMP packet (APP1 XMP) — KEEP (copy verbatim for MVP)
+
+Most XMP properties are descriptive (dc:title, dc:creator, dc:rights,
+photoshop:DateCreated, Iptc4xmpCore:*) and remain valid.
+
+Fields that should ideally be updated (phase 2, requires XML parsing):
+- `xmp:ModifyDate` — set to current time
+- `xmp:MetadataDate` — set to current time
+- `xmp:CreatorTool` — set to `"imgcrush <version>"`
+- `tiff:Software` — set to `"imgcrush <version>"`
+- `xmpMM:InstanceID` — regenerate (new file instance)
+
+For MVP, copy the entire XMP block unchanged. The stale fields are
+non-critical — no application will break from an outdated ModifyDate
+in XMP when the EXIF DateTime is correct.
+
+#### IPTC (APP13) — KEEP (copy verbatim)
+
+IPTC-IIM contains purely descriptive/editorial metadata: caption,
+keywords, byline, credit, copyright, city, country, category. None
+describe image encoding. Safe to copy unchanged.
+
+### Implementation implications for the splicing approach
+
+The raw byte-level splicing design (copy entire APP segments as blobs)
+conflicts with the need to drop/update individual EXIF tags within the
+APP1 EXIF segment. Resolution:
+
+**Phase 1 (MVP):** Copy APP1/EXIF, APP1/XMP, APP2/ICC, and APP13/IPTC
+segments verbatim from the original into the re-encoded output. Accept
+that some EXIF fields (compression tags, Software, DateTime) will be
+stale. This is the same behavior as jpegtran `-copy all` — and it's
+what most users expect from a `--keep-metadata` flag.
+
+**Phase 2:** Parse the EXIF APP1 segment for targeted changes:
+1. Drop entire IFD1 (thumbnail) — broken offset pointers, stale pixels
+2. Drop MakerNote (0x927C) — broken internal offsets after relocation
+3. Drop ImageUniqueID (0xA420) — identity changed by re-encoding
+4. Drop YCbCrSubSampling (0x0212) if present — may not match encoder
+5. Update Software (0x0131) → `"imgcrush <version>"`
+6. Update DateTime (0x0132) → current time
+7. Keep everything else in IFD0 and ExifIFD — most encoding tags are
+   either not present in JPEG EXIF or unchanged by JPEG→JPEG re-encode
+8. Re-serialize the EXIF APP1 segment
+
+This requires a minimal EXIF parser/writer — either a small in-house
+implementation (TIFF IFD structure is well-documented) or vendoring
+dsoprea/go-exif.
+
+**Phase 3:** Parse XMP (XML) to update xmp:ModifyDate, xmp:CreatorTool,
+etc. Standard Go `encoding/xml` suffices for targeted edits.
+
+### Privacy-sensitive fields (future `--strip-private` flag)
+
+These fields are technically correct after re-encoding but pose
+privacy risks when images are shared publicly:
+
+| Risk | Fields |
+|------|--------|
+| **High** | GPS Latitude/Longitude (0x0002/0x0004), XMP face regions (mwg-rs:*) |
+| **Medium** | GPS Altitude (0x0006), BodySerialNumber (0xA431), CameraOwnerName (0xA430), MakerNote internals |
+| **Low** | LensSerialNumber (0xA435), Artist (0x013B) |
+
+Planned future flags:
+- `--strip-metadata` / `-s` — strip all metadata
+- `--strip-gps` — strip only GPS data
+- `--strip-private` — strip GPS + serials + owner name + face regions
+- `--keep-icc` — when combined with `--strip-metadata`, preserve ICC
+  profile for color accuracy
+
+### Reference: how other tools handle metadata
+
+**exiftool `-TagsFromFile`**: Copies all "safe" writable tags by default.
+Skips tags marked "Unsafe" (dimensions, compression, strip offsets,
+ICC profile). With `-unsafe` flag copies structural tags too. MakerNotes
+copied as monolithic blob with internal offset fixup logic.
+
+**jpegtran `-copy all`**: Copies all APP markers verbatim, byte-for-byte.
+Does not update any tags. Acceptable because jpegtran is lossless —
+pixel data is identical.
+
+### Six Hats analysis: writing pure-Go metadata libraries (2026-05-27)
+
+Question: should imgcrush write its own pure-Go libraries to fill the
+gaps in the Go metadata ecosystem (no library covers read+write for
+EXIF, XMP, ICC, and IPTC)?
+
+#### White Hat (facts)
+
+- No pure-Go library exists that can both read and write EXIF, XMP,
+  ICC, and IPTC across JPEG and PNG.
+- dsoprea/go-exif is the closest — handles EXIF read/write but is
+  dormant since 2023, no ICC/XMP write.
+- The EXIF spec (CIPA DC-008) is public and stable — hasn't changed
+  fundamentally in years.
+- JPEG and PNG binary formats are well-documented and simple at the
+  segment/chunk level.
+- MakerNote handling requires per-brand logic; exiftool maintains
+  ~150+ brand-specific modules built over 20+ years.
+- imgcrush's actual need is narrow: splice opaque segments, drop IFD1,
+  drop MakerNote, update ~3 tags.
+- Go's stdlib has no plans to add metadata support (golang/go#33457
+  frozen).
+
+#### Red Hat (feelings)
+
+- It feels like the right thing to do — filling a real gap in the Go
+  ecosystem, owning your stack.
+- But there's a nagging feeling of "this is how side projects die" —
+  the library becomes the project and the tool never ships the feature.
+- The pure-Go philosophy is emotionally core to imgcrush — depending on
+  a dormant third-party library feels wrong.
+- There's excitement in the craftsmanship of understanding a binary
+  format deeply, but also dread at the long tail of broken files from
+  obscure cameras.
+
+#### Black Hat (risks)
+
+- **Scope creep.** "Just a small EXIF writer" becomes a full metadata
+  suite once real-world files hit it. Edge cases multiply: endianness,
+  offset chains, IFD linking, non-conforming files from hundreds of
+  camera models.
+- **Maintenance burden.** A library has users, issues, expectations
+  of stability. You're now maintaining two projects.
+- **Quality risk.** A half-baked metadata writer that corrupts files is
+  worse than no metadata writer. Silently breaking someone's photo
+  archive is a serious failure mode.
+- **Opportunity cost.** Time spent on metadata libraries is time not
+  spent on imgcrush's bigger gaps (PNG palette optimization, progressive
+  JPEG).
+- **Testing surface.** You'd need a corpus of images from dozens of
+  camera brands to validate.
+- **MakerNote is a trap.** You either handle it (unbounded complexity)
+  or don't (users complain about lost data).
+
+#### Yellow Hat (benefits)
+
+- **Full ownership of the dependency chain.** No dormant upstream, no
+  surprise breakage, no API you can't change.
+- **Exactly the right abstraction.** A general library tries to do
+  everything; an imgcrush-internal package does exactly what's needed.
+- **The Go ecosystem benefits.** If the internal package is
+  well-designed, it could be extracted later and fill a genuine gap.
+- **Deep understanding.** Building the parser means you truly understand
+  what imgcrush is doing with metadata — no black-box surprises.
+- **The narrow scope is genuinely tractable.** "Parse TIFF IFDs, drop
+  entries by tag ID, rewrite offsets, serialize" is a few hundred lines
+  of Go.
+- **Phase 1 needs no library at all.** Opaque blob copying is pure byte
+  work. The library is only needed for phase 2, so there's time to get
+  it right.
+
+#### Green Hat (alternatives)
+
+- **Don't write a library at all.** Phase 1 (opaque blob copy) covers
+  most users. Ship it, see if anyone actually asks for phase 2.
+- **Fork dsoprea/go-exif.** It works, it's dormant not broken. Vendor
+  it, strip what you don't need, fix what you do. Less work than
+  starting from scratch; the hard offset-fixup logic is already written.
+- **Hybrid approach.** Write a minimal internal "EXIF surgery" module
+  (just IFD parsing, tag drop, tag update, reserialize) — not a general
+  library, not extracted, not published. If it grows useful, reconsider.
+- **Shell out to exiftool as an optional enhancer.** Violates the
+  pure-Go principle for the core tool, but could be offered as
+  `imgcrush --use-exiftool` for users who want perfect metadata
+  handling. Honest about why.
+- **Collaborate.** Contribute write support to bep/imagemeta (actively
+  maintained, high quality). The maintainer may welcome it or reject it,
+  but worth asking.
+- **Wait.** The Go ecosystem is active. Someone may write this library.
+  imgcrush ships phase 1 now, revisits in a year.
+
+#### Blue Hat (process and summary)
+
+The hats converge on a clear path:
+
+1. **Ship phase 1 now** — opaque blob splicing, no library needed. This
+   delivers the feature users want (`--keep-metadata`) with minimal risk.
+
+2. **Don't write a general-purpose library.** The Black Hat risks are
+   real and the Yellow Hat benefits come mostly from the narrow scope,
+   not from building something general.
+
+3. **For phase 2, choose between:** (a) a minimal internal EXIF surgery
+   module — just enough to drop IFD1/MakerNote and update
+   Software/DateTime, or (b) forking/vendoring dsoprea. Decision can
+   wait until phase 1 is shipped and user feedback reveals whether
+   phase 2 is even needed.
+
+4. **Explicitly don't touch MakerNote.** Drop it, document why, move on.
+   This is the single biggest scope trap.
+
+5. **Consider reaching out to bep/imagemeta** about write support before
+   building anything. A five-minute conversation could save months.
+
+---
+
 ## 6. Design Implications Summary
 
 | Concern | Decision |
@@ -343,7 +793,7 @@ because it's doing a more aggressive (destructive) thing.
 | Format detection | stdlib `image.DecodeConfig` — no deps |
 | JPEG compression | stdlib `image/jpeg` re-encode at q=85 default |
 | PNG compression | stdlib `image/png` with `BestCompression` |
-| Metadata | Stripped on re-encode (document clearly) |
+| Metadata | Stripped on re-encode; preserve via raw byte-level splicing (see section 5) |
 | Skip-if-larger | Essential safety net, especially for already-optimized files |
 | External tools | None — pure Go only, no shelling out, ever |
 | Better PNG | Post-MVP: klauspost/compress, filter optimization, color quantization |
