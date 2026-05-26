@@ -50,8 +50,11 @@ go test ./...
   dry-run support. Casual use on real files must be safe.
 - **Proper Unix citizen.** Flags, exit codes, stderr for errors, stdout
   for output. Works in scripts, CI, Makefiles, SSH sessions.
-- **Honest about tradeoffs.** Go's JPEG encoder is 15-30% less efficient
-  than mozjpeg. We say so and improve over time via pure-Go libraries.
+- **Honest about tradeoffs.** imgcrush JPEG savings come from lossy
+  re-encoding, not smarter compression. ImageOptim (without JPEGmini)
+  does lossless optimization — a fundamentally different operation.
+  Don't frame imgcrush results as "better than ImageOptim." See
+  RESEARCH.md section 4 benchmark for details.
 - **jpegoptim as CLI design model.** Its flag design (threshold, dry-run,
   output dir, granular strip flags, stdin/stdout) is what good Unix
   tools look like. See RESEARCH.md section 0.

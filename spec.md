@@ -98,13 +98,30 @@ carries only pixel data. The tool must:
 
 ## Backlog (post-MVP)
 
-Improvements that close the gap with ImageOptim, all staying pure Go:
+Improvements that close the gap with ImageOptim, all staying pure Go.
+Prioritized by benchmark findings (see RESEARCH.md section 4).
 
-### Better compression (pure Go)
-- **klauspost/compress deflate** — swap stdlib deflate for smaller PNG output
-- **PNG filter optimization** — try all 5 filter types per row, pick best
+### Priority 1: Close the PNG gap (biggest real gap from benchmark)
+
+Benchmark showed ImageOptim gets 80% on few-color PNGs where imgcrush
+gets 23%. The gap is palette optimization + better filter strategies.
+
 - **Color quantization** — lossy PNG mode via colorquant/octreequant
-  (pngquant-like, `--lossy-png` flag)
+  (pngquant-like, `--lossy-png` flag). Highest-value single improvement.
+- **PNG filter optimization** — try all 5 filter types per row, pick best
+- **klauspost/compress deflate** — swap stdlib deflate for smaller output
+
+### Priority 2: Honest framing of JPEG compression
+
+Benchmark revealed imgcrush JPEG savings come from lossy re-encoding,
+not smarter compression. ImageOptim (without JPEGmini) does lossless
+JPEG optimization — different operation entirely. imgcrush currently
+has nothing for lossless JPEG.
+
+- **Lossless JPEG Huffman optimization** — no pure-Go solution exists
+  today. Research needed: is a pure-Go jpegtran-style optimizer feasible?
+- **Progressive JPEG encoding** — Go stdlib only does baseline. Progressive
+  is typically 5-10% smaller for large images.
 
 ### Better Unix citizenship
 - **Glob patterns**: `imgcrush "*.jpg"`
