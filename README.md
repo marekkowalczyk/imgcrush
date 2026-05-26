@@ -39,12 +39,12 @@ Requires Go 1.21 or later.
 go install github.com/marekkowalczyk/imgcrush@latest
 ```
 
-Or build from source:
+Or from a local clone:
 
 ```bash
 git clone https://github.com/marekkowalczyk/imgcrush.git
 cd imgcrush
-go build -o imgcrush .
+go install .
 ```
 
 ## Usage

@@ -29,11 +29,11 @@ Safe by default, honest about tradeoffs, and a proper Unix citizen
     encoding, metadata, library choices, or CLI design.
 - **SPEC.md** — feature spec with vision, MVP scope, and backlog.
 
-## Build and run
+## Install and run
 
 ```bash
-go build -o imgcrush .
-./imgcrush [flags] <files...>
+go install .
+imgcrush [flags] <files...>
 ```
 
 ## Test
