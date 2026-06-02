@@ -39,7 +39,9 @@ type result struct {
 	err      error
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+// parseArgs parses command-line flags and returns the config, file list, and
+// an exit code. A non-negative exit code means run should return immediately.
+func parseArgs(args []string, stdout, stderr io.Writer) (config, []string, int) {
 	fs := flag.NewFlagSet("imgcrush", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -68,34 +70,43 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
-			return 0
+			return cfg, nil, 0
 		}
-		return 1
+		return cfg, nil, 1
 	}
 
 	if showVersion {
 		fmt.Fprintf(stdout, "imgcrush %s\n", version)
-		return 0
+		return cfg, nil, 0
 	}
 
 	files := fs.Args()
 	if len(files) == 0 {
 		fmt.Fprintf(stderr, "imgcrush: no files specified\n")
 		fmt.Fprintf(stderr, "Run 'imgcrush --help' for usage.\n")
-		return 1
+		return cfg, nil, 1
 	}
 
 	if cfg.quality < 1 || cfg.quality > 100 {
 		fmt.Fprintf(stderr, "imgcrush: --quality must be between 1 and 100\n")
-		return 1
+		return cfg, nil, 1
 	}
 	if cfg.pngLevel < 0 || cfg.pngLevel > 3 {
 		fmt.Fprintf(stderr, "imgcrush: --png-level must be between 0 and 3\n")
-		return 1
+		return cfg, nil, 1
 	}
 	if cfg.outdir != "" && cfg.suffix != "" {
 		fmt.Fprintf(stderr, "imgcrush: --outdir and --suffix are mutually exclusive\n")
-		return 1
+		return cfg, nil, 1
+	}
+
+	return cfg, files, -1
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	cfg, files, exitCode := parseArgs(args, stdout, stderr)
+	if exitCode >= 0 {
+		return exitCode
 	}
 
 	if cfg.outdir != "" {
@@ -110,11 +121,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var (
-		totalOrig    int64
-		totalNew     int64
-		processed    int
-		skipped      int
-		errCount     int
+		totalOrig int64
+		totalNew  int64
+		processed int
+		skipped   int
+		errCount  int
 	)
 
 	for _, file := range files {
