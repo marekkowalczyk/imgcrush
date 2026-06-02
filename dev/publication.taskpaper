@@ -1,0 +1,32 @@
+imgcrush 1.0.0 publication plan:
+
+Release infrastructure: @done
+	- Rewrite README with honest positioning @done
+	- Move internal docs (RESEARCH, SPEC, AAR) to dev/ @done
+	- Add GitHub Pages config (_config.yml) @done
+	- Add badges (Go Report Card, MIT license) @done
+	- Bump version to 1.0.0 @done
+	- Add .goreleaser.yml (darwin/linux amd64+arm64, windows amd64) @done
+	- Add GitHub Actions release workflow @done
+	- Tag v1.0.0 and push @done
+	- Verify release binaries on GitHub Releases @done
+
+Google & discoverability: @done
+	- Enable GitHub Pages @done
+	- Add Google Search Console verification file @done
+	- Verify site in Search Console @done
+
+Distribution channels:
+	- Post to r/golang — pure Go, zero deps angle @due(soon)
+	- Post to Go forum (forum.golangbridge.org) @due(soon)
+	- Homebrew tap (homebrew-imgcrush) — optional, nice for macOS users @due(later)
+
+Content marketing:
+	- Blog post: building a CLI tool in Go, imgcrush as the case study @due(later)
+		Angle: the process, design decisions, Unix philosophy, honest tradeoffs
+		Reference: Small Sharp Software Tools (Hogan), Powerful CLI Apps in Go (Gerardi)
+	- Add to personal site / portfolio @due(later)
+
+Not pursuing:
+	- Show HN — compression gap vs ImageOptim makes it a tough pitch for that audience
+	- Product Hunt — wrong audience for a developer CLI tool
