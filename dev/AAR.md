@@ -38,3 +38,19 @@ Continuous improvement log. Each session ends with a brief review: what went wel
 - When classifying EXIF tags, always check whether the tag is actually present in real-world JPEG files, not just whether the spec defines it
 - When asked to apply a named framework or method, verify you know it correctly before attempting — admit uncertainty rather than improvise
 - Consider the TIFF vs JPEG EXIF distinction whenever referencing ExifTool documentation — ExifTool's classifications are TIFF-centric
+
+## 2026-06-02 — Public release preparation and v1.0.1
+
+**What went well:**
+- README rewrite landed a much more honest, compelling pitch — led with what the tool *is* rather than what it replaces
+- Release infrastructure (goreleaser + GitHub Actions) worked on first try — v1.0.0 binaries built for all 5 targets without issues
+- Go Report Card issues were identified and fixed quickly — gofmt whitespace and cyclomatic complexity both resolved in one pass
+- `urltomd` solved the JS-rendered page problem cleanly after curl/WebFetch couldn't
+
+**What didn't go well:**
+- Spent several attempts trying to scrape Go Report Card via curl and WebFetch before user suggested `urltomd` — should have checked for locally installed tools first
+- The gofmt -s issue was trivial (whitespace alignment) and should have been caught before the initial release
+
+**What we'll do differently:**
+- Run `gofmt -s` and `gocyclo -over 15` before tagging a release — add to the pre-release checklist
+- When scraping JS-rendered pages, check for local tools like `urltomd` before attempting raw HTTP approaches

@@ -32,6 +32,7 @@ Safe by default, honest about tradeoffs, and a proper Unix citizen
     encoding, metadata, library choices, or CLI design.
 - **dev/SPEC.md** — feature spec with vision, MVP scope, and backlog.
 - **dev/AAR.md** — after action review / continuous improvement log.
+- **dev/publication.taskpaper** — release and distribution plan.
 
 ## Install and run
 
