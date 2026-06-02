@@ -1,0 +1,3 @@
+title: "imgcrush — command-line image compression"
+description: "A quick, non-hacky command-line tool for compressing JPEG and PNG images. One binary, no dependencies, pure Go."
+theme: jekyll-theme-minimal

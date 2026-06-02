@@ -1,37 +1,55 @@
 # imgcrush
 
-A free, clean, pure-Go drop-in replacement for [ImageOptim](https://imageoptim.com).
+[![Go Report Card](https://goreportcard.com/badge/github.com/marekkowalczyk/imgcrush)](https://goreportcard.com/report/github.com/marekkowalczyk/imgcrush)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-One binary. No dependencies. No GUI. No AppleScript. No C toolchain.
-A proper Unix tool for compressing JPEG and PNG images.
+A quick, non-hacky command-line tool for compressing JPEG and PNG images.
+One binary, no dependencies, pure Go.
 
-## Why
+```
+$ imgcrush --dry-run *.jpg
 
-ImageOptim is great at compression, but its architecture is a mess:
+imgcrush: metadata (EXIF, ICC, XMP) will be stripped
+  dry   photo.jpg  2.4 MB -> 1.1 MB (54.2%)
+  dry   hero.jpg   890.3 KB -> 412.7 KB (53.6%)
+  skip  thumb.jpg (minimal gain: 3.2%)
 
-- The "CLI" is an npm package that launches the GUI via AppleScript
-  and polls for completion. It breaks across macOS updates.
-- Under the hood, the GUI shells out to 6+ separate C/Rust tools
-  (mozjpeg, jpegtran, pngquant, oxipng, zopfli, and more).
-- No output directory option. No reliable exit codes. No stdout.
-  No way to use it in scripts, CI, or over SSH.
+  2 compressed, 1 skipped, 0 errors. Saved 1.8 MB.
+```
 
-imgcrush takes a different approach:
+## Why this exists
 
-- **Pure Go.** No shelling out to external tools -- ever. Single
-  binary, built with `go build`.
-- **A proper Unix citizen.** Flags, exit codes, stderr for errors,
-  composable with pipes and scripts.
-- **Safe by default.** Backups before overwrite, dry-run mode,
-  skips files that are already well-compressed.
-- **Honest about tradeoffs.** imgcrush JPEG savings come from lossy
-  re-encoding, not smarter compression. ImageOptim does lossless JPEG
-  optimization — a fundamentally different operation. We say so clearly.
+I needed a command-line image compressor that works inside automated
+workflows — CI pipelines, Makefiles, SSH sessions, Claude Code. Something
+I could call from a script and trust to behave: flags, exit codes, stderr
+for errors, stdout for output.
 
-## Status
+[ImageOptim](https://imageoptim.com) is excellent at compression, but its
+CLI story is a mess: an npm package that launches the GUI via AppleScript
+and polls for completion. It breaks across macOS updates, can't run
+headless, and doesn't compose with anything.
 
-**MVP complete.** Core compression, all output modes, safety features,
-and tests are in place. See the roadmap below for what's next.
+imgcrush takes a different approach: a single Go binary that does one
+thing — shrink images — and tries to be a good Unix citizen about it.
+
+**It is not as good as ImageOptim at compression.** Sometimes by a long
+shot. ImageOptim bundles mozjpeg, oxipng, pngquant, and other
+purpose-built C/Rust tools that have been optimized for years. imgcrush
+uses Go's standard library encoders, which are decent but not
+state-of-the-art. What you get in return is simplicity: no C toolchain,
+no shelling out, no fragile dependency chain. It just works.
+
+Your mileage may vary. If you need top-of-the-line compression, use
+ImageOptim (or mozjpeg/oxipng directly). If you want something quick and
+reliable that you can drop into any workflow, here you are.
+
+### Philosophy
+
+This tool is built in the spirit of the Unix tradition of small, sharp,
+composable tools — the kind described in Brian P. Hogan's
+[Small, Sharp Software Tools](https://pragprog.com/titles/bhcldev/small-sharp-software-tools/)
+and Ricardo Gerardi's
+[Powerful Command-Line Applications in Go](https://pragprog.com/titles/rggo/powerful-command-line-applications-in-go/).
 
 ## Install
 
@@ -55,7 +73,7 @@ go install .
 # Compress files in-place (creates .bak backups)
 imgcrush photo.jpg logo.png
 
-# Dry run -- see what would happen without writing anything
+# Dry run — see what would happen without writing anything
 imgcrush --dry-run *.jpg
 
 # Set JPEG quality (default: 85)
@@ -84,63 +102,59 @@ imgcrush --quiet photo.jpg
 | `--suffix <string>` | Append suffix to output filenames | (none) |
 | `--dry-run` | Report what would happen, don't write | false |
 | `--force` | Compress even if gain is below 10% | false |
-| `--no-backup` | Skip creating .bak files in-place mode | false |
+| `--no-backup` | Skip creating .bak files in in-place mode | false |
 | `--quiet` | Suppress all output | false |
 | `--help`, `-h` | Show help | |
 | `--version`, `-v` | Show version | |
 
 ## How it works
 
-imgcrush detects image format from file content (magic bytes, not
-file extension), decodes the image, and re-encodes it with
-compression:
+imgcrush detects image format from file content (magic bytes, not file
+extension), decodes the image, and re-encodes it with compression:
 
 - **JPEG**: Re-encodes at the specified quality level using Go's
-  `image/jpeg` encoder. Default quality of 85 is the "visually
-  lossless" sweet spot.
+  `image/jpeg` encoder. Default quality of 85 is a reasonable
+  size-vs-quality sweet spot.
 - **PNG**: Re-encodes with Go's `image/png` at maximum compression.
 
 ### What you should know
 
 - **Metadata is stripped.** Re-encoding through Go's image pipeline
-  discards EXIF, ICC color profiles, and XMP data. This is inherent
-  to the approach, not a bug. Back up originals if you need metadata.
-- **JPEG compression is lossy.** Each decode/re-encode cycle loses
-  some quality. imgcrush mitigates this: if re-encoding wouldn't save
-  at least 10%, the file is skipped (override with `--force`).
+  discards EXIF, ICC color profiles, and XMP data. This is inherent to
+  the approach. Back up originals if you need metadata.
+- **JPEG compression is lossy.** Each decode/re-encode cycle loses some
+  quality. imgcrush mitigates this: if re-encoding wouldn't save at
+  least 10%, the file is skipped (override with `--force`).
 - **Backups by default.** In-place mode creates `.bak` copies before
   overwriting. Use `--no-backup` if you don't want them.
 
 ### Tradeoffs vs ImageOptim
 
-imgcrush prioritizes simplicity and correctness over raw compression
-ratio:
-
 | | ImageOptim | imgcrush |
 |---|---|---|
-| Dependencies | 6+ C/Rust tools, npm, GUI app | None (single binary) |
+| Dependencies | 6+ C/Rust tools, npm, GUI app | None (single Go binary) |
 | CLI | AppleScript wrapper (fragile) | Native flags, exit codes, stdout |
 | Output options | In-place only | In-place, suffix, output directory |
 | Runs headless | No | Yes |
 | JPEG approach | Lossless optimization (mozjpeg) | Lossy re-encoding (Go stdlib) |
-| PNG compression | Excellent (oxipng + pngquant) | Decent (Go stdlib, improving) |
+| PNG compression | Excellent (oxipng + pngquant) | Decent (Go stdlib) |
 | Safety | Overwrites, no dry-run | Backups, dry-run, skip threshold |
 
-## Roadmap
+## Exit codes
 
-The backlog focuses on closing the compression gap and improving
-Unix integration, all in pure Go:
+| Code | Meaning |
+|------|---------|
+| 0 | All files processed successfully |
+| 1 | One or more files failed, or invalid arguments |
 
-- Better PNG compression via `klauspost/compress` and filter optimization
-- Lossy PNG mode (color quantization, pngquant-style)
-- Directory and recursive mode
-- Parallel processing
-- Stdin/stdout pipe support
-- Metadata preservation (EXIF, ICC, XMP, IPTC)
-- WebP output
+## Testing
 
-See [SPEC.md](SPEC.md) for the full feature spec.
+```bash
+go test ./...
+```
 
 ## License
 
 [MIT](LICENSE)
+
+Created by [Marek Kowalczyk](https://orcid.org/0009-0008-3874-6736).

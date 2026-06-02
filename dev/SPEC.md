@@ -49,7 +49,7 @@ ImageOptim on macOS is a Rube Goldberg machine:
 ### Compression controls
 
 - `--quality <1-100>` — JPEG quality (default: 85, the "visually lossless"
-  sweet spot for Go's encoder — see RESEARCH.md)
+  sweet spot for Go's encoder — see dev/RESEARCH.md)
 - `--png-level <0-3>` — PNG compression level mapped to Go's
   `png.DefaultCompression`, `png.BestSpeed`, `png.BestCompression`,
   `png.NoCompression` (default: best compression)
@@ -99,7 +99,7 @@ carries only pixel data. The tool must:
 ## Backlog (post-MVP)
 
 Improvements that close the gap with ImageOptim, all staying pure Go.
-Prioritized by benchmark findings (see RESEARCH.md section 4).
+Prioritized by benchmark findings (see dev/RESEARCH.md section 4).
 
 ### Priority 1: Close the PNG gap (biggest real gap from benchmark)
 
@@ -140,14 +140,14 @@ has nothing for lossless JPEG.
   byte-level segment/chunk splicing — no third-party library needed.
   Copy metadata segments as opaque blobs from original into output.
   Some EXIF fields (compression tags, Software, DateTime) will be stale
-  but non-breaking. See RESEARCH.md section 5 for full design rationale.
+  but non-breaking. See dev/RESEARCH.md section 5 for full design rationale.
 - **Metadata preservation (phase 2)**: Parse the EXIF APP1 segment to
   drop invalid tags (compression-structural, thumbnail IFD, MakerNote,
   ImageUniqueID) and update others (Software, DateTime). Requires a
-  minimal EXIF parser/writer. See RESEARCH.md section 5 field analysis.
+  minimal EXIF parser/writer. See dev/RESEARCH.md section 5 field analysis.
 - **Granular metadata stripping**: `--strip-gps`, `--strip-exif`,
   `--strip-private`, `--keep-icc` — per-field control for privacy and
   selective stripping. Requires parsing individual EXIF/XMP fields.
-  See RESEARCH.md section 5 privacy analysis.
+  See dev/RESEARCH.md section 5 privacy analysis.
 - **Preserve timestamps**: `--keep-mtime` to preserve modification time
 - **Progress bar**: for large batches

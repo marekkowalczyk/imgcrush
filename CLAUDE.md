@@ -1,13 +1,13 @@
 # imgcrush
 
-A free, clean, pure-Go drop-in replacement for ImageOptim.
+A quick, non-hacky command-line tool for compressing JPEG and PNG
+images. One binary, no dependencies, pure Go.
 
 ## Project overview
 
-imgcrush replaces ImageOptim and its hacky ecosystem (AppleScript CLI
-wrapper, 13 bundled C/Rust tools, GUI-only workflow) with a single Go
-binary. No external dependencies, no shelling out — ever. That's the
-core principle.
+imgcrush is a simple, honest image compression CLI. Not as good as
+ImageOptim at raw compression, but it just works: single binary, no
+external dependencies, no shelling out, proper Unix behavior.
 
 Safe by default, honest about tradeoffs, and a proper Unix citizen
 (flags, exit codes, stdout/stderr, composable with pipes and scripts).
@@ -18,7 +18,7 @@ Safe by default, honest about tradeoffs, and a proper Unix citizen
 
 ## Key references
 
-- **RESEARCH.md** — comprehensive background document. Includes:
+- **dev/RESEARCH.md** — comprehensive background document. Includes:
   - Section 0: detailed profile of ImageOptim (architecture, all 13
     bundled tools, GUI behavior, CLI limitations, what it gets right
     and wrong) plus jpegoptim CLI as a design model
@@ -30,7 +30,8 @@ Safe by default, honest about tradeoffs, and a proper Unix citizen
   - Design implications summary
   - **Consult before making any implementation decisions** about
     encoding, metadata, library choices, or CLI design.
-- **SPEC.md** — feature spec with vision, MVP scope, and backlog.
+- **dev/SPEC.md** — feature spec with vision, MVP scope, and backlog.
+- **dev/AAR.md** — after action review / continuous improvement log.
 
 ## Install and run
 
@@ -57,10 +58,10 @@ go test ./...
   re-encoding, not smarter compression. ImageOptim (without JPEGmini)
   does lossless optimization — a fundamentally different operation.
   Don't frame imgcrush results as "better than ImageOptim." See
-  RESEARCH.md section 4 benchmark for details.
+  dev/RESEARCH.md section 4 benchmark for details.
 - **jpegoptim as CLI design model.** Its flag design (threshold, dry-run,
   output dir, granular strip flags, stdin/stdout) is what good Unix
-  tools look like. See RESEARCH.md section 0.
+  tools look like. See dev/RESEARCH.md section 0.
 
 ## Code style
 
