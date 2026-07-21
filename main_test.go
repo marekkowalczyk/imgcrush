@@ -224,6 +224,29 @@ func TestPNGCompression(t *testing.T) {
 	}
 }
 
+func TestOutdirCollision(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	outdir := t.TempDir()
+
+	srcA := filepath.Join(dirA, "img.jpg")
+	srcB := filepath.Join(dirB, "img.jpg")
+	copyTestFile(t, "testdata/jpeg/large-cat-photo.jpg", srcA)
+	copyTestFile(t, "testdata/jpeg/large-cat-photo.jpg", srcB)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--outdir", outdir, srcA, srcB}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for outdir collision, got %d", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("collision")) {
+		t.Fatalf("expected collision error in stderr, got: %s", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(outdir, "img.jpg")); err == nil {
+		t.Fatal("colliding inputs should not have written an output file")
+	}
+}
+
 func TestMutuallyExclusiveFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"--outdir", "/tmp", "--suffix", ".min", "test.jpg"}, &stdout, &stderr)

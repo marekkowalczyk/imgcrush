@@ -10,10 +10,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 )
 
-const version = "1.0.1"
+const version = "1.1.0"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -120,6 +122,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "imgcrush: metadata (EXIF, ICC, XMP) will be stripped\n")
 	}
 
+	results := processFiles(files, &cfg)
+
 	var (
 		totalOrig int64
 		totalNew  int64
@@ -128,8 +132,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		errCount  int
 	)
 
-	for _, file := range files {
-		r := processFile(file, &cfg)
+	for _, r := range results {
 		if r.err != nil {
 			fmt.Fprintf(stderr, "imgcrush: %s: %v\n", r.file, r.err)
 			errCount++
@@ -167,6 +170,63 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// processFiles compresses files concurrently, one worker per CPU, and
+// returns results in the same order as the input files.
+func processFiles(files []string, cfg *config) []result {
+	collisions := outdirCollisions(files, cfg)
+
+	results := make([]result, len(files))
+	workers := runtime.NumCPU()
+	if workers > len(files) {
+		workers = len(files)
+	}
+
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				file := files[i]
+				if collisions[file] {
+					results[i] = result{file: file, err: fmt.Errorf(
+						"output path collision in --outdir (duplicate basename %q among inputs)",
+						filepath.Base(file))}
+					continue
+				}
+				results[i] = processFile(file, cfg)
+			}
+		}()
+	}
+	for i := range files {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	return results
+}
+
+// outdirCollisions reports which input files would clobber each other's
+// output when written to a shared --outdir (same base filename).
+func outdirCollisions(files []string, cfg *config) map[string]bool {
+	collisions := make(map[string]bool)
+	if cfg.outdir == "" {
+		return collisions
+	}
+	counts := make(map[string]int)
+	for _, f := range files {
+		counts[filepath.Base(f)]++
+	}
+	for _, f := range files {
+		if counts[filepath.Base(f)] > 1 {
+			collisions[f] = true
+		}
+	}
+	return collisions
 }
 
 func actionLabel(cfg *config) string {
@@ -218,7 +278,7 @@ func processFile(path string, cfg *config) result {
 	outPath := outputPath(path, cfg)
 
 	if outPath == path && !cfg.noBackup {
-		if err := copyFile(path, path+".bak"); err != nil {
+		if err := os.WriteFile(path+".bak", data, 0644); err != nil {
 			return result{file: path, err: fmt.Errorf("cannot create backup: %w", err)}
 		}
 	}
@@ -295,14 +355,6 @@ func outputPath(path string, cfg *config) string {
 		return base + cfg.suffix + ext
 	}
 	return path
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0644)
 }
 
 func humanSize(b int64) string {
