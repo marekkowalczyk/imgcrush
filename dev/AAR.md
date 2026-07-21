@@ -54,3 +54,18 @@ Continuous improvement log. Each session ends with a brief review: what went wel
 **What we'll do differently:**
 - Run `gofmt -s` and `gocyclo -over 15` before tagging a release — add to the pre-release checklist
 - When scraping JS-rendered pages, check for local tools like `urltomd` before attempting raw HTTP approaches
+
+## 2026-07-21 — Concurrency, backup fix, outdir collision guard (v1.1.0)
+
+**What went well:**
+- Low-hanging-fruit review of `main.go` surfaced three real, independent improvements: backup now writes from the already-in-memory buffer instead of re-reading the source file, batch processing runs on a worker pool (`NumCPU` workers) instead of serially, and `--outdir` runs with duplicate input basenames are now rejected instead of silently letting one file clobber another
+- A candidate fourth finding (divide-by-zero on empty files) was checked against actual behavior before implementing — confirmed unreachable (empty files already fail format detection earlier), so it was correctly dropped instead of adding unneeded code
+- `go test -race ./...` passed clean on the first run after adding the worker pool, including a new `TestOutdirCollision` test
+- User caught that the version constant hadn't been bumped — a reminder to treat the version bump as part of the same change, not an afterthought
+
+**What didn't go well:**
+- Didn't proactively bump the version or flag the release-readiness gaps (uncommitted changes, missing AAR entry) until asked — should treat "implement all" on a real fix as implicitly including version/commit hygiene for a project with an explicit session protocol
+
+**What we'll do differently:**
+- When CLAUDE.md defines a session protocol (start/close) or version-bump convention, apply it proactively after a substantive code change rather than waiting to be asked
+- Before claiming a bug exists, reproduce it (as done here for the divide-by-zero case) rather than assuming from code inspection alone
