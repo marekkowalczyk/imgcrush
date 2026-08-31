@@ -263,6 +263,68 @@ func TestInvalidQuality(t *testing.T) {
 	}
 }
 
+func TestOmakaseFewColorsUsesPalette(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--dry-run", "testdata/png/simple-few-colors.png"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("palette")) {
+		t.Fatalf("expected palette strategy in output, got: %s", stdout.String())
+	}
+}
+
+func TestLossyPNGFlagsMutuallyExclusive(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--lossy-png", "--no-lossy-png", "testdata/png/simple-few-colors.png"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("mutually exclusive")) {
+		t.Fatalf("expected mutual exclusion error, got: %s", stderr.String())
+	}
+}
+
+func TestThresholdSkipsLowGain(t *testing.T) {
+	// After first compression of a JPEG, second run with high threshold should skip.
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "test.jpg")
+	copyTestFile(t, "testdata/jpeg/small-sunrise.jpg", src)
+
+	var stdout1, stderr1 bytes.Buffer
+	if code := run([]string{"--no-backup", src}, &stdout1, &stderr1); code != 0 {
+		t.Fatalf("first pass: %d %s", code, stderr1.String())
+	}
+
+	var stdout2, stderr2 bytes.Buffer
+	code := run([]string{"--no-backup", "--threshold", "50", src}, &stdout2, &stderr2)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr2.String())
+	}
+	if !bytes.Contains(stdout2.Bytes(), []byte("skip")) {
+		t.Fatalf("expected skip with high threshold, got: %s", stdout2.String())
+	}
+}
+
+func TestNoLossyPNGStillAllowsExactPalette(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--dry-run", "--no-lossy-png", "testdata/png/simple-few-colors.png"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("palette")) {
+		t.Fatalf("exact palette should still run with --no-lossy-png, got: %s", stdout.String())
+	}
+}
+
+func TestInvalidPNGColors(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--png-colors", "512", "testdata/png/simple-few-colors.png"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatal("expected exit 1 for invalid --png-colors")
+	}
+}
+
 func copyTestFile(t *testing.T, src, dst string) {
 	t.Helper()
 	data, err := os.ReadFile(src)

@@ -88,6 +88,9 @@ imgcrush --suffix .min photo.jpg  # produces photo.min.jpg
 # Force compression even if the gain is small
 imgcrush --force photo.jpg
 
+# Disable automatic lossy PNG quantization (exact ≤256 palettes still allowed)
+imgcrush --no-lossy-png icons/*.png
+
 # Suppress all output (exit code only)
 imgcrush --quiet photo.jpg
 ```
@@ -98,10 +101,14 @@ imgcrush --quiet photo.jpg
 |------|-------------|---------|
 | `--quality <1-100>` | JPEG quality | 85 |
 | `--png-level <0-3>` | PNG compression level | 3 (best) |
+| `--png-colors <1-256>` | Max palette size for lossy PNG | 256 |
+| `--threshold <0-100>` | Skip if size gain is below this percent | 10 |
 | `--outdir <path>` | Write output to a directory | (in-place) |
 | `--suffix <string>` | Append suffix to output filenames | (none) |
 | `--dry-run` | Report what would happen, don't write | false |
-| `--force` | Compress even if gain is below 10% | false |
+| `--force` | Compress even if gain is below `--threshold` | false |
+| `--lossy-png` | Force palette quantization for PNG | false |
+| `--no-lossy-png` | Disable automatic lossy PNG quantization | false |
 | `--no-backup` | Skip creating .bak files in in-place mode | false |
 | `--quiet` | Suppress all output | false |
 | `--help`, `-h` | Show help | |
@@ -115,7 +122,11 @@ extension), decodes the image, and re-encodes it with compression:
 - **JPEG**: Re-encodes at the specified quality level using Go's
   `image/jpeg` encoder. Default quality of 85 is a reasonable
   size-vs-quality sweet spot.
-- **PNG**: Re-encodes with Go's `image/png` at maximum compression.
+- **PNG (omakase)**: Classifies each image and runs a small tournament:
+  - ≤256 unique colors → exact paletted PNG (pixel-lossless remap)
+  - 257–2048 unique colors, binary alpha only → try lossy 256-color palette
+  - otherwise → truecolor at max compression
+  - keeps the smallest candidate that passes the size-gain threshold
 
 ### What you should know
 
@@ -124,7 +135,11 @@ extension), decodes the image, and re-encodes it with compression:
   the approach. Back up originals if you need metadata.
 - **JPEG compression is lossy.** Each decode/re-encode cycle loses some
   quality. imgcrush mitigates this: if re-encoding wouldn't save at
-  least 10%, the file is skipped (override with `--force`).
+  least `--threshold` percent (default 10%), the file is skipped
+  (override with `--force`).
+- **PNG logos may be quantized.** Omakase can reduce logo-like PNGs to a
+  palette. Use `--no-lossy-png` to forbid lossy quantization (exact
+  palettes for ≤256-color images still run).
 - **Backups by default.** In-place mode creates `.bak` copies before
   overwriting. Use `--no-backup` if you don't want them.
 
@@ -137,7 +152,7 @@ extension), decodes the image, and re-encodes it with compression:
 | Output options | In-place only | In-place, suffix, output directory |
 | Runs headless | No | Yes |
 | JPEG approach | Lossless optimization (mozjpeg) | Lossy re-encoding (Go stdlib) |
-| PNG compression | Excellent (oxipng + pngquant) | Decent (Go stdlib) |
+| PNG compression | Excellent (oxipng + pngquant) | Omakase palette + Go stdlib |
 | Safety | Overwrites, no dry-run | Backups, dry-run, skip threshold |
 
 ## Exit codes

@@ -53,17 +53,36 @@ ImageOptim on macOS is a Rube Goldberg machine:
 - `--png-level <0-3>` — PNG compression level mapped to Go's
   `png.DefaultCompression`, `png.BestSpeed`, `png.BestCompression`,
   `png.NoCompression` (default: best compression)
+- `--png-colors <1-256>` — max palette size for lossy PNG (default: 256)
+- `--threshold <0-100>` — skip if size gain is below this percent (default: 10)
+- `--lossy-png` / `--no-lossy-png` — force or forbid automatic lossy PNG
+  quantization (mutually exclusive)
+
+### PNG omakase (default)
+
+For each PNG, imgcrush classifies the image and tournaments candidates:
+
+- ≤256 unique RGBA colors → exact paletted encode (pixel-lossless remap)
+- 257–2048 unique colors and binary alpha only → try lossy 256-color palette
+  (`octreequant`); skip auto-lossy when any pixel has partial alpha
+- otherwise → truecolor only
+- always also encode truecolor; keep the smallest candidate that passes
+  never-grow + `--threshold`
+
+`--no-lossy-png` disables the 257–2048 quantization path but still allows
+exact palettes. `--lossy-png` forces a palette attempt even when the
+classifier would skip.
 
 ### Safe-by-default behavior
 
 The MVP must be safe to run casually on real files without surprises:
 
 - **Skip well-compressed files.** If re-encoding would not reduce file size
-  by at least 10%, skip the file and report it as "skipped (minimal gain)".
-  Override with `--force`.
+  by at least `--threshold` percent (default 10%), skip the file and report
+  it as "skipped (minimal gain)". Override with `--force`.
 - **Never silently degrade.** Running imgcrush twice on the same JPEG must
   not keep degrading quality. The skip-if-minimal-gain rule handles this:
-  after the first compression, subsequent runs see <10% gain and skip.
+  after the first compression, subsequent runs see below-threshold gain and skip.
 - **Backup before overwrite.** In in-place mode, create a `.bak` copy of
   the original before writing. Flag `--no-backup` to skip.
 - **Refuse non-image files.** Exit with an error, don't silently produce
@@ -101,13 +120,10 @@ carries only pixel data. The tool must:
 Improvements that close the gap with ImageOptim, all staying pure Go.
 Prioritized by benchmark findings (see dev/RESEARCH.md section 4).
 
-### Priority 1: Close the PNG gap (biggest real gap from benchmark)
+### Priority 1: Remaining PNG improvements
 
-Benchmark showed ImageOptim gets 80% on few-color PNGs where imgcrush
-gets 23%. The gap is palette optimization + better filter strategies.
+Palette omakase (exact + lossy tournament) shipped in v1.2.0. Still open:
 
-- **Color quantization** — lossy PNG mode via colorquant/octreequant
-  (pngquant-like, `--lossy-png` flag). Highest-value single improvement.
 - **PNG filter optimization** — try all 5 filter types per row, pick best
 - **klauspost/compress deflate** — swap stdlib deflate for smaller output
 

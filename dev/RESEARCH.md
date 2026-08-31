@@ -792,8 +792,9 @@ The hats converge on a clear path:
 |---------|----------|
 | Format detection | stdlib `image.DecodeConfig` — no deps |
 | JPEG compression | stdlib `image/jpeg` re-encode at q=85 default |
-| PNG compression | stdlib `image/png` with `BestCompression` |
+| PNG compression | Omakase: exact/lossy palette tournament + truecolor `BestCompression` |
 | Metadata | Stripped on re-encode; preserve via raw byte-level splicing (see section 5) |
+| Dependencies | Pure Go: `github.com/delthas/octreequant` for lossy palette |
+| Better PNG | Post-omakase: klauspost/compress, filter optimization |
 | Skip-if-larger | Essential safety net, especially for already-optimized files |
 | External tools | None — pure Go only, no shelling out, ever |
-| Better PNG | Post-MVP: klauspost/compress, filter optimization, color quantization |

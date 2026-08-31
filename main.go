@@ -15,21 +15,25 @@ import (
 	"sync"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
 type config struct {
-	quality  int
-	pngLevel int
-	outdir   string
-	suffix   string
-	dryRun   bool
-	force    bool
-	noBackup bool
-	quiet    bool
+	quality    int
+	pngLevel   int
+	outdir     string
+	suffix     string
+	dryRun     bool
+	force      bool
+	noBackup   bool
+	quiet      bool
+	lossyPNG   bool
+	noLossyPNG bool
+	pngColors  int
+	threshold  float64
 }
 
 type result struct {
@@ -38,6 +42,7 @@ type result struct {
 	newSize  int64
 	skipped  bool
 	reason   string
+	strategy string // PNG: truecolor, palette, palette-lossy
 	err      error
 }
 
@@ -52,10 +57,14 @@ func parseArgs(args []string, stdout, stderr io.Writer) (config, []string, int) 
 
 	fs.IntVar(&cfg.quality, "quality", 85, "JPEG quality (1-100)")
 	fs.IntVar(&cfg.pngLevel, "png-level", 3, "PNG compression level (0=none, 1=fast, 2=default, 3=best)")
+	fs.IntVar(&cfg.pngColors, "png-colors", 256, "max palette size for lossy PNG (1-256)")
+	fs.Float64Var(&cfg.threshold, "threshold", 10, "skip if size gain is below this percent")
 	fs.StringVar(&cfg.outdir, "outdir", "", "write output to this directory")
 	fs.StringVar(&cfg.suffix, "suffix", "", "append suffix to output filenames (e.g. .min)")
 	fs.BoolVar(&cfg.dryRun, "dry-run", false, "report what would happen without writing")
-	fs.BoolVar(&cfg.force, "force", false, "compress even if gain is below 10%")
+	fs.BoolVar(&cfg.force, "force", false, "compress even if gain is below --threshold")
+	fs.BoolVar(&cfg.lossyPNG, "lossy-png", false, "force palette quantization for PNG")
+	fs.BoolVar(&cfg.noLossyPNG, "no-lossy-png", false, "disable automatic lossy PNG quantization")
 	fs.BoolVar(&cfg.noBackup, "no-backup", false, "skip creating .bak files in in-place mode")
 	fs.BoolVar(&cfg.quiet, "quiet", false, "suppress all output")
 	fs.BoolVar(&showVersion, "version", false, "show version")
@@ -65,7 +74,8 @@ func parseArgs(args []string, stdout, stderr io.Writer) (config, []string, int) 
 		fmt.Fprintf(stderr, "imgcrush %s — compress JPEG and PNG images\n\n", version)
 		fmt.Fprintf(stderr, "Usage: imgcrush [flags] <files...>\n\n")
 		fmt.Fprintf(stderr, "Note: re-encoding strips all metadata (EXIF, ICC profiles, XMP).\n")
-		fmt.Fprintf(stderr, "Back up originals if you need metadata preserved.\n\n")
+		fmt.Fprintf(stderr, "Back up originals if you need metadata preserved.\n")
+		fmt.Fprintf(stderr, "PNG omakase may quantize logo-like images to a palette for smaller files.\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 	}
@@ -99,6 +109,18 @@ func parseArgs(args []string, stdout, stderr io.Writer) (config, []string, int) 
 	}
 	if cfg.outdir != "" && cfg.suffix != "" {
 		fmt.Fprintf(stderr, "imgcrush: --outdir and --suffix are mutually exclusive\n")
+		return cfg, nil, 1
+	}
+	if cfg.lossyPNG && cfg.noLossyPNG {
+		fmt.Fprintf(stderr, "imgcrush: --lossy-png and --no-lossy-png are mutually exclusive\n")
+		return cfg, nil, 1
+	}
+	if cfg.pngColors < 1 || cfg.pngColors > 256 {
+		fmt.Fprintf(stderr, "imgcrush: --png-colors must be between 1 and 256\n")
+		return cfg, nil, 1
+	}
+	if cfg.threshold < 0 || cfg.threshold > 100 {
+		fmt.Fprintf(stderr, "imgcrush: --threshold must be between 0 and 100\n")
 		return cfg, nil, 1
 	}
 
@@ -153,9 +175,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		saved := float64(r.origSize-r.newSize) / float64(r.origSize) * 100
 
 		if !cfg.quiet {
-			fmt.Fprintf(stdout, "  %s  %s  %s -> %s (%.1f%%)\n",
-				actionLabel(&cfg), r.file,
-				humanSize(r.origSize), humanSize(r.newSize), saved)
+			if r.strategy != "" && r.strategy != "truecolor" {
+				fmt.Fprintf(stdout, "  %s  %s  %s -> %s (%.1f%%, %s)\n",
+					actionLabel(&cfg), r.file,
+					humanSize(r.origSize), humanSize(r.newSize), saved, r.strategy)
+			} else {
+				fmt.Fprintf(stdout, "  %s  %s  %s -> %s (%.1f%%)\n",
+					actionLabel(&cfg), r.file,
+					humanSize(r.origSize), humanSize(r.newSize), saved)
+			}
 		}
 	}
 
@@ -254,7 +282,7 @@ func processFile(path string, cfg *config) result {
 		return result{file: path, err: fmt.Errorf("cannot decode %s: %w", format, err)}
 	}
 
-	compressed, err := encodeImage(img, format, cfg)
+	compressed, strategy, err := compressImage(img, format, cfg)
 	if err != nil {
 		return result{file: path, err: fmt.Errorf("cannot encode %s: %w", format, err)}
 	}
@@ -266,13 +294,13 @@ func processFile(path string, cfg *config) result {
 	}
 
 	gain := float64(origSize-newSize) / float64(origSize) * 100
-	if gain < 10 && !cfg.force {
+	if gain < cfg.threshold && !cfg.force {
 		return result{file: path, origSize: origSize, skipped: true,
 			reason: fmt.Sprintf("minimal gain: %.1f%%", gain)}
 	}
 
 	if cfg.dryRun {
-		return result{file: path, origSize: origSize, newSize: newSize}
+		return result{file: path, origSize: origSize, newSize: newSize, strategy: strategy}
 	}
 
 	outPath := outputPath(path, cfg)
@@ -287,7 +315,7 @@ func processFile(path string, cfg *config) result {
 		return result{file: path, err: fmt.Errorf("cannot write: %w", err)}
 	}
 
-	return result{file: path, origSize: origSize, newSize: newSize}
+	return result{file: path, origSize: origSize, newSize: newSize, strategy: strategy}
 }
 
 func detectFormat(data []byte) (string, error) {
@@ -314,20 +342,21 @@ func decodeImage(data []byte, format string) (image.Image, error) {
 	}
 }
 
-func encodeImage(img image.Image, format string, cfg *config) ([]byte, error) {
-	var buf bytes.Buffer
+// compressImage encodes img for the given format. For PNG it runs the omakase
+// tournament and returns the winning strategy name.
+func compressImage(img image.Image, format string, cfg *config) ([]byte, string, error) {
 	switch format {
 	case "jpeg":
+		var buf bytes.Buffer
 		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: cfg.quality}); err != nil {
-			return nil, err
+			return nil, "", err
 		}
+		return buf.Bytes(), "", nil
 	case "png":
-		enc := png.Encoder{CompressionLevel: pngCompressionLevel(cfg.pngLevel)}
-		if err := enc.Encode(&buf, img); err != nil {
-			return nil, err
-		}
+		return crushPNG(img, cfg)
+	default:
+		return nil, "", fmt.Errorf("unsupported format: %s", format)
 	}
-	return buf.Bytes(), nil
 }
 
 func pngCompressionLevel(level int) png.CompressionLevel {
