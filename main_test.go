@@ -149,6 +149,47 @@ func TestInPlaceNoBackup(t *testing.T) {
 	}
 }
 
+func TestNoBackupAfterFilename(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "test.jpg")
+	copyTestFile(t, "testdata/jpeg/small-sunrise.jpg", src)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{src, "--no-backup"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(src + ".bak"); err == nil {
+		t.Fatal("backup created despite trailing --no-backup")
+	}
+	if bytes.Contains(stderr.Bytes(), []byte("cannot read")) {
+		t.Fatalf("treated --no-backup as a file: %s", stderr.String())
+	}
+}
+
+func TestTrailingQuietFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--dry-run", "testdata/jpeg/large-cat-photo.jpg", "--quiet"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("quiet with trailing flag produced output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestDoubleDashTreatsFlagAsFilename(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--", "--no-backup"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("cannot read")) &&
+		!bytes.Contains(stderr.Bytes(), []byte("--no-backup")) {
+		t.Fatalf("expected --no-backup treated as filename, got: %s", stderr.String())
+	}
+}
+
 func TestSkipAlreadyOptimal(t *testing.T) {
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "test.jpg")
@@ -200,6 +241,33 @@ func TestQuietMode(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("quiet mode produced stderr: %q", stderr.String())
+	}
+}
+
+func TestStreamingSkipsAppearLive(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"--dry-run",
+		"testdata/jpeg/large-cat-photo.jpg",
+		"testdata/jpeg/small-sunrise.jpg",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
+	}
+	// bytes.Buffer is not a TTY — no N/total litany; per-file lines are the signal.
+	if bytes.Contains(stderr.Bytes(), []byte("imgcrush: 1/")) {
+		t.Fatalf("non-TTY should not print N/total progress: %q", stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("large-cat-photo.jpg")) ||
+		!bytes.Contains(stdout.Bytes(), []byte("small-sunrise.jpg")) {
+		t.Fatalf("expected per-file output, got: %q", stdout.String())
+	}
+}
+
+func TestWriterIsTTY(t *testing.T) {
+	var buf bytes.Buffer
+	if writerIsTTY(&buf) {
+		t.Fatal("bytes.Buffer should not count as TTY")
 	}
 }
 

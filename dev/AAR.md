@@ -2,6 +2,22 @@
 
 Continuous improvement log. Each session ends with a brief review: what went well, what didn't, what to change. This is the POOGI (Process Of Ongoing Improvement) record for this project.
 
+## 2026-08-31 — Omakase PNG, flags/cache, live progress (v1.3.1)
+
+**What went well:**
+- PNG omakase closed the measured logo/UI gap (few-color test image ~80% with palette vs ~23% truecolor-only)
+- Flag-after-file parsing and content-hash skip cache matched real Desktop workflow pain
+- Debug-mode logs proved the "slow 1/37" root cause: CLI `version` in the cache fingerprint invalidated entries on every bump; fixed with stable `cacheAlgoVersion`
+
+**What didn't go well:**
+- N/total newline progress fought streaming skip lines and felt slower than the work itself; over-corrected by removing progress entirely before restoring a TTY-only `\r` line
+- Left sync debug-file instrumentation in the binary during investigation, which itself serialized workers
+
+**What we'll do differently:**
+- Keep cache fingerprints on an algorithm epoch, never the semver string users see in `-v`
+- Prefer a single `\r` status line (or live result lines) over a scrolling N/total litany
+- Strip debug instrumentation before asking users to judge performance
+
 ## 2026-05-26 — Project setup and MVP implementation
 
 **What went well:**

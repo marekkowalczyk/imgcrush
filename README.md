@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A quick, non-hacky command-line tool for compressing JPEG and PNG images.
-One binary, no dependencies, pure Go.
+One binary, pure Go (no CGo, no shelling out).
 
 ```
 $ imgcrush --dry-run *.jpg
@@ -35,9 +35,10 @@ thing — shrink images — and tries to be a good Unix citizen about it.
 **It is not as good as ImageOptim at compression.** Sometimes by a long
 shot. ImageOptim bundles mozjpeg, oxipng, pngquant, and other
 purpose-built C/Rust tools that have been optimized for years. imgcrush
-uses Go's standard library encoders, which are decent but not
-state-of-the-art. What you get in return is simplicity: no C toolchain,
-no shelling out, no fragile dependency chain. It just works.
+uses Go's standard library encoders plus a small pure-Go quantizer for
+logo-like PNGs — decent but not state-of-the-art. What you get in return
+is simplicity: no C toolchain, no shelling out, no fragile dependency
+chain. It just works.
 
 Your mileage may vary. If you need top-of-the-line compression, use
 ImageOptim (or mozjpeg/oxipng directly). If you want something quick and
@@ -88,8 +89,14 @@ imgcrush --suffix .min photo.jpg  # produces photo.min.jpg
 # Force compression even if the gain is small
 imgcrush --force photo.jpg
 
+# Flags may appear after filenames (shell-loop friendly)
+imgcrush photo.jpg --no-backup
+
 # Disable automatic lossy PNG quantization (exact ≤256 palettes still allowed)
 imgcrush --no-lossy-png icons/*.png
+
+# Re-check everything ignoring the skip cache
+imgcrush --no-cache *.png
 
 # Suppress all output (exit code only)
 imgcrush --quiet photo.jpg
@@ -106,13 +113,17 @@ imgcrush --quiet photo.jpg
 | `--outdir <path>` | Write output to a directory | (in-place) |
 | `--suffix <string>` | Append suffix to output filenames | (none) |
 | `--dry-run` | Report what would happen, don't write | false |
-| `--force` | Compress even if gain is below `--threshold` | false |
+| `--force` | Compress even if gain is below `--threshold` (also bypasses cache read) | false |
 | `--lossy-png` | Force palette quantization for PNG | false |
 | `--no-lossy-png` | Disable automatic lossy PNG quantization | false |
 | `--no-backup` | Skip creating .bak files in in-place mode | false |
+| `--no-cache` | Disable incremental skip cache | false |
 | `--quiet` | Suppress all output | false |
 | `--help`, `-h` | Show help | |
 | `--version`, `-v` | Show version | |
+
+Flags may appear before or after filenames. Use `--` before a path that
+starts with `-`.
 
 ## How it works
 
@@ -127,6 +138,22 @@ extension), decodes the image, and re-encodes it with compression:
   - 257–2048 unique colors, binary alpha only → try lossy 256-color palette
   - otherwise → truecolor at max compression
   - keeps the smallest candidate that passes the size-gain threshold
+
+### Incremental cache
+
+After a file is crushed (or skipped as already optimal / minimal gain),
+imgcrush records a content-hash marker under the user cache directory
+(`~/Library/Caches/imgcrush` on macOS, `~/.cache/imgcrush` on Linux).
+Later runs with the same compression settings skip those files before
+decode/encode (`skip … (cached)`). Use `--force` to re-process anyway, or
+`--no-cache` to disable the cache entirely.
+
+### Live per-file output
+
+Multi-file runs print each `ok`/`skip` line as that file finishes (not
+only at the end), so long batches do not look hung. On a terminal, a
+single updating `imgcrush: N/total` line on stderr shows batch position
+between results (no scrolling litany). Suppressed by `--quiet`.
 
 ### What you should know
 
@@ -147,7 +174,7 @@ extension), decodes the image, and re-encodes it with compression:
 
 | | ImageOptim | imgcrush |
 |---|---|---|
-| Dependencies | 6+ C/Rust tools, npm, GUI app | None (single Go binary) |
+| Dependencies | 6+ C/Rust tools, npm, GUI app | Pure Go module; single binary |
 | CLI | AppleScript wrapper (fragile) | Native flags, exit codes, stdout |
 | Output options | In-place only | In-place, suffix, output directory |
 | Runs headless | No | Yes |

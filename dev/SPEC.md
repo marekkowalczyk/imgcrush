@@ -57,6 +57,8 @@ ImageOptim on macOS is a Rube Goldberg machine:
 - `--threshold <0-100>` — skip if size gain is below this percent (default: 10)
 - `--lossy-png` / `--no-lossy-png` — force or forbid automatic lossy PNG
   quantization (mutually exclusive)
+- `--no-cache` — disable the incremental skip cache
+- `--no-backup` — skip `.bak` creation in in-place mode
 
 ### PNG omakase (default)
 
@@ -72,6 +74,20 @@ For each PNG, imgcrush classifies the image and tournaments candidates:
 `--no-lossy-png` disables the 257–2048 quantization path but still allows
 exact palettes. `--lossy-png` forces a palette attempt even when the
 classifier would skip.
+
+### CLI argument order
+
+Flags may appear before or after filenames. A bare `--` ends flag parsing;
+following tokens are filenames even if they start with `-`.
+
+### Incremental skip cache
+
+After a successful write, or a skip for already-optimal / minimal-gain,
+imgcrush stores a content-hash marker keyed by compression settings under
+the user cache dir (`os.UserCacheDir()/imgcrush`). Subsequent runs with
+matching settings skip those files before decode/encode (`cached`).
+`--force` bypasses cache reads; `--no-cache` disables read and write.
+Dry-run does not write cache entries.
 
 ### Safe-by-default behavior
 
@@ -99,7 +115,8 @@ carries only pixel data. The tool must:
 
 ### Output and feedback
 
-- Print per-file summary: filename, original size, new size, % reduction
+- Print each per-file summary as that file finishes (live, completion order)
+- On a TTY, show a single updating `imgcrush: N/total` progress line on stderr
 - Print total summary at the end: files processed, total saved, files skipped
 - `--quiet` flag to suppress all output (exit code only)
 
