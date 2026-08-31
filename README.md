@@ -17,6 +17,20 @@ imgcrush: metadata (EXIF, ICC, XMP) will be stripped
   2 compressed, 1 skipped, 0 errors. Saved 1.8 MB.
 ```
 
+## Product elevator statement
+
+For developers and anyone who shrinks JPEG and PNG images from scripts,
+CI, or SSH — people who need compression they can trust in automation —
+existing GUI-first tools are excellent at saving bytes but awkward or
+fragile as command-line citizens. imgcrush is a single pure-Go binary
+that compresses images with safe defaults (backups, dry-run, skip-if-
+minimal-gain) and honest Unix behavior (flags, exit codes, stdout/
+stderr). You get reliable, scriptable image crushing without installing
+a C toolchain or shelling out to a stack of external tools. Unlike
+ImageOptim-class wrappers, it is one binary you can drop into any
+workflow and reason about — trading peak compression ratio for
+simplicity and predictability.
+
 ## Why this exists
 
 I needed a command-line image compressor that works inside automated
