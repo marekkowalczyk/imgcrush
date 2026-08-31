@@ -8,15 +8,20 @@ Continuous improvement log. Each session ends with a brief review: what went wel
 - PNG omakase closed the measured logo/UI gap (few-color test image ~80% with palette vs ~23% truecolor-only)
 - Flag-after-file parsing and content-hash skip cache matched real Desktop workflow pain
 - Debug-mode logs proved the "slow 1/37" root cause: CLI `version` in the cache fingerprint invalidated entries on every bump; fixed with stable `cacheAlgoVersion`
+- README product elevator statement landed as a short North Star (target / need / solution / benefit / differentiation) without jargon
 
 **What didn't go well:**
+- First answer framed the ask as wall-clock performance; user had to correct: optimize best compression in reasonable time, not speed for its own sake
 - N/total newline progress fought streaming skip lines and felt slower than the work itself; over-corrected by removing progress entirely before restoring a TTY-only `\r` line
 - Left sync debug-file instrumentation in the binary during investigation, which itself serialized workers
+- Drafted interspersed-flag UX that leaned on a second `--`; user pushback ("no other tool works like that") correctly forced flags-after-files without requiring it for normal invocations
 
 **What we'll do differently:**
-- Keep cache fingerprints on an algorithm epoch, never the semver string users see in `-v`
+- Clarify the optimization objective (bytes vs latency vs both) before proposing changes — ask once if ambiguous
+- Keep cache fingerprints on an algorithm epoch, never the semver string users see in `-v` (promoted to CLAUDE.md)
 - Prefer a single `\r` status line (or live result lines) over a scrolling N/total litany
 - Strip debug instrumentation before asking users to judge performance
+- Match common Unix CLI conventions (flags anywhere before `--`) unless there is a strong reason not to
 
 ## 2026-05-26 — Project setup and MVP implementation
 

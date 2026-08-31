@@ -63,6 +63,12 @@ go test ./...
 - **jpegoptim as CLI design model.** Its flag design (threshold, dry-run,
   output dir, granular strip flags, stdin/stdout) is what good Unix
   tools look like. See dev/RESEARCH.md section 0.
+- **Compression quality over wall-clock.** Default goal is best bytes in
+  reasonable time, not minimum latency. Confirm the objective if the
+  user says "performance" without specifying which.
+- **Skip-cache fingerprints use an algorithm epoch**
+  (`cacheAlgoVersion` in `cache.go`), never the CLI semver shown by
+  `-v`. Bump the epoch only when crush output/settings semantics change.
 
 ## Code style
 
