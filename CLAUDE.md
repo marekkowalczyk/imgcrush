@@ -69,6 +69,10 @@ go test ./...
 - **Skip-cache fingerprints use an algorithm epoch**
   (`cacheAlgoVersion` in `cache.go`), never the CLI semver shown by
   `-v`. Bump the epoch only when crush output/settings semantics change.
+- **Crush unknowns; skip only when settled.** Never refuse or defer
+  work because a file is remote/dataless (e.g. iCloud). Cache layers
+  may avoid *unnecessary* content reads for already-settled files;
+  unknown inputs still materialize and crush.
 
 ## Code style
 

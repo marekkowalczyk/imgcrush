@@ -2,6 +2,25 @@
 
 Continuous improvement log. Each session ends with a brief review: what went well, what didn't, what to change. This is the POOGI (Process Of Ongoing Improvement) record for this project.
 
+## 2026-09-01 — Cascade skip cache + v1.4.0 (#1)
+
+**What went well:**
+- Debug-mode timings on Desktop proved the real cost: `ReadFile` ~3.7s/file (iCloud materialize), not SHA-256 or encode — fix targeted the right layer
+- Cascade design (L0 inode / xattr / L2 content) matched rename + copy + re-run without giving up crush-on-unknown
+- v1.4.0 tagged, goreleaser succeeded, local `go install` verified
+
+**What didn't go well:**
+- First framed copy-as-miss as acceptable; user correctly pushed that “same bytes elsewhere” is real duplicate recognition for this tool
+- Proposed skipping dataless iCloud files by default; user had to correct: **the purpose is crushing files**, not avoiding cloud materialization
+- Over-indexed on “never download” cleverness before restating product intent
+
+**What we'll do differently:**
+- Before any skip/defer policy for cloud/remote files, restate product intent: unknowns get crushed (download OK); settlement markers only avoid *unnecessary* reads
+- When designing cache identity, separate “fast re-run” (Stat/inode) from “same bytes” (content) explicitly — both are in scope unless the user narrows
+- Keep `cacheAlgoVersion` independent of CLI semver (unchanged; reinforced this session with 1.4.0 CLI vs 1.5.0 epoch)
+
+---
+
 ## 2026-08-31 — Omakase PNG, flags/cache, live progress (v1.3.1)
 
 **What went well:**
