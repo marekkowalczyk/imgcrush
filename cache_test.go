@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -45,19 +46,19 @@ func TestCacheLookupStore(t *testing.T) {
 	cfg := &config{quality: 85, pngLevel: 3, pngColors: 256, threshold: 10}
 	fp := settingsFingerprint(cfg)
 	data := []byte("hello-image-bytes")
-	h := contentHash(data)
+	id := contentCacheID(data, fp)
 
-	if cacheLookup(dir, h, fp) {
+	if cacheLookup(dir, cacheKindContent, id) {
 		t.Fatal("expected miss")
 	}
-	cacheStore(dir, h, fp)
-	if !cacheLookup(dir, h, fp) {
+	cacheStore(dir, cacheKindContent, id)
+	if !cacheLookup(dir, cacheKindContent, id) {
 		t.Fatal("expected hit after store")
 	}
-	// Different settings fingerprint → miss
 	cfg2 := *cfg
 	cfg2.quality = 70
-	if cacheLookup(dir, h, settingsFingerprint(&cfg2)) {
+	id2 := contentCacheID(data, settingsFingerprint(&cfg2))
+	if cacheLookup(dir, cacheKindContent, id2) {
 		t.Fatal("expected miss for different settings")
 	}
 }
@@ -85,7 +86,7 @@ func TestProcessFileCacheSkip(t *testing.T) {
 		t.Fatal("first pass should not be cached")
 	}
 
-	// Second pass on (possibly rewritten) file should hit cache.
+	// Second pass on (possibly rewritten) file should hit L0 cache.
 	r2 := processFile(src, cfg)
 	if r2.err != nil {
 		t.Fatalf("second pass: %v", r2.err)
@@ -139,5 +140,126 @@ func TestDryRunDoesNotWriteCache(t *testing.T) {
 	entries, _ := os.ReadDir(cacheDir)
 	if len(entries) != 0 {
 		t.Fatal("dry-run must not write cache")
+	}
+}
+
+func TestCacheL2HitAfterCopy(t *testing.T) {
+	tmp := t.TempDir()
+	cacheDir := t.TempDir()
+	src := filepath.Join(tmp, "a.jpg")
+	copyTestFile(t, "testdata/jpeg/small-sunrise.jpg", src)
+
+	cfg := &config{
+		quality:   85,
+		pngLevel:  3,
+		pngColors: 256,
+		threshold: 10,
+		noBackup:  true,
+		cacheDir:  cacheDir,
+	}
+
+	r1 := processFile(src, cfg)
+	if r1.err != nil {
+		t.Fatalf("first: %v", r1.err)
+	}
+
+	// Byte-identical copy at a new path (new inode) should hit L2 after read.
+	dst := filepath.Join(tmp, "b.jpg")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r2 := processFile(dst, cfg)
+	if r2.err != nil {
+		t.Fatalf("copy pass: %v", r2.err)
+	}
+	if !r2.skipped || r2.reason != "cached" {
+		t.Fatalf("copy: skipped=%v reason=%q, want cached via L2", r2.skipped, r2.reason)
+	}
+}
+
+func TestCacheL0SurvivesRename(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("inode L0 is path-based on Windows")
+	}
+	tmp := t.TempDir()
+	cacheDir := t.TempDir()
+	src := filepath.Join(tmp, "orig.jpg")
+	copyTestFile(t, "testdata/jpeg/small-sunrise.jpg", src)
+
+	cfg := &config{
+		quality:   85,
+		pngLevel:  3,
+		pngColors: 256,
+		threshold: 10,
+		noBackup:  true,
+		cacheDir:  cacheDir,
+	}
+
+	r1 := processFile(src, cfg)
+	if r1.err != nil {
+		t.Fatalf("first: %v", r1.err)
+	}
+
+	renamed := filepath.Join(tmp, "renamed.jpg")
+	if err := os.Rename(src, renamed); err != nil {
+		t.Fatal(err)
+	}
+
+	r2 := processFile(renamed, cfg)
+	if r2.err != nil {
+		t.Fatalf("renamed: %v", r2.err)
+	}
+	if !r2.skipped || r2.reason != "cached" {
+		t.Fatalf("rename: skipped=%v reason=%q, want cached via L0", r2.skipped, r2.reason)
+	}
+}
+
+func TestCacheXattrHitBackfillsL0(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("xattr only on darwin/linux")
+	}
+	tmp := t.TempDir()
+	cacheDir := t.TempDir()
+	src := filepath.Join(tmp, "x.jpg")
+	copyTestFile(t, "testdata/jpeg/small-sunrise.jpg", src)
+
+	cfg := &config{
+		quality:   85,
+		pngLevel:  3,
+		pngColors: 256,
+		threshold: 10,
+		noBackup:  true,
+		cacheDir:  cacheDir,
+	}
+	fp := settingsFingerprint(cfg)
+
+	r1 := processFile(src, cfg)
+	if r1.err != nil {
+		t.Fatalf("first: %v", r1.err)
+	}
+	got, ok := getSettledXattr(src)
+	if !ok || got != fp {
+		t.Fatalf("xattr after crush: ok=%v val=%q want %q", ok, got, fp)
+	}
+
+	// Clear central cache; xattr alone should settle and backfill L0.
+	if err := os.RemoveAll(cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r2 := processFile(src, cfg)
+	if r2.err != nil {
+		t.Fatalf("xattr pass: %v", r2.err)
+	}
+	if !r2.skipped || r2.reason != "cached" {
+		t.Fatalf("xattr: skipped=%v reason=%q, want cached", r2.skipped, r2.reason)
 	}
 }

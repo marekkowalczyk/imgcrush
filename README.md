@@ -156,11 +156,19 @@ extension), decodes the image, and re-encodes it with compression:
 ### Incremental cache
 
 After a file is crushed (or skipped as already optimal / minimal gain),
-imgcrush records a content-hash marker under the user cache directory
+imgcrush records settlement markers so later runs can skip work:
+
+- **Inode (Stat-only)** — same file after rename or iCloud eviction skips
+  without reading contents
+- **On-file xattr** (macOS/Linux, best-effort) — survives when the central
+  cache is cleared
+- **Content hash** — same bytes at a new path skip encode after one read,
+  then the inode/xattr layers make the next visit free
+
+Markers live under the user cache directory
 (`~/Library/Caches/imgcrush` on macOS, `~/.cache/imgcrush` on Linux).
-Later runs with the same compression settings skip those files before
-decode/encode (`skip … (cached)`). Use `--force` to re-process anyway, or
-`--no-cache` to disable the cache entirely.
+Unknown files are always crushed (including iCloud downloads when needed).
+Use `--force` to re-process anyway, or `--no-cache` to disable the cache.
 
 ### Live per-file output
 

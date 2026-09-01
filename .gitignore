@@ -4,5 +4,8 @@ imgcrush
 # Test output
 testdata/output/
 
+# Regenerable warm-cache skip batch (go run testdata/gen_test_images.go)
+testdata/png/cache-skip/
+
 # OS
 .DS_Store

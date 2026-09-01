@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 )
 
-const version = "1.3.1"
+const version = "1.4.0"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -367,17 +367,44 @@ func actionLabel(cfg *config) string {
 }
 
 func processFile(path string, cfg *config) result {
+	cdir := resolveCacheDir(cfg)
+	fp := settingsFingerprint(cfg)
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		return result{file: path, err: fmt.Errorf("cannot stat: %w", err)}
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return result{file: path, err: fmt.Errorf("cannot resolve path: %w", err)}
+	}
+	l0 := inodeCacheID(abs, fi, fp)
+
+	if shouldReadCache(cfg) {
+		if cacheLookup(cdir, cacheKindInode, l0) {
+			return result{file: path, origSize: fi.Size(), skipped: true, reason: "cached"}
+		}
+		if xattr, ok := getSettledXattr(path); ok && xattr == fp {
+			if shouldWriteCache(cfg) {
+				cacheStore(cdir, cacheKindInode, l0)
+			}
+			return result{file: path, origSize: fi.Size(), skipped: true, reason: "cached"}
+		}
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return result{file: path, err: fmt.Errorf("cannot read: %w", err)}
 	}
 
 	origSize := int64(len(data))
-	cdir := resolveCacheDir(cfg)
-	fp := settingsFingerprint(cfg)
-	hash := contentHash(data)
+	l2 := contentCacheID(data, fp)
 
-	if shouldReadCache(cfg) && cacheLookup(cdir, hash, fp) {
+	if shouldReadCache(cfg) && cacheLookup(cdir, cacheKindContent, l2) {
+		if shouldWriteCache(cfg) {
+			cacheStore(cdir, cacheKindInode, l0)
+			setSettledXattr(path, fp)
+		}
 		return result{file: path, origSize: origSize, skipped: true, reason: "cached"}
 	}
 
@@ -400,7 +427,7 @@ func processFile(path string, cfg *config) result {
 
 	if newSize >= origSize {
 		if shouldWriteCache(cfg) {
-			cacheStore(cdir, hash, fp)
+			storeSettledCache(cdir, path, fp, data)
 		}
 		return result{file: path, origSize: origSize, skipped: true, reason: "already optimal"}
 	}
@@ -408,7 +435,7 @@ func processFile(path string, cfg *config) result {
 	gain := float64(origSize-newSize) / float64(origSize) * 100
 	if gain < cfg.threshold && !cfg.force {
 		if shouldWriteCache(cfg) {
-			cacheStore(cdir, hash, fp)
+			storeSettledCache(cdir, path, fp, data)
 		}
 		return result{file: path, origSize: origSize, skipped: true,
 			reason: fmt.Sprintf("minimal gain: %.1f%%", gain)}
@@ -431,7 +458,7 @@ func processFile(path string, cfg *config) result {
 	}
 
 	if shouldWriteCache(cfg) {
-		cacheStore(cdir, contentHash(compressed), fp)
+		storeSettledCache(cdir, outPath, fp, compressed)
 	}
 
 	return result{file: path, origSize: origSize, newSize: newSize, strategy: strategy}

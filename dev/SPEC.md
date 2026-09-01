@@ -83,9 +83,19 @@ following tokens are filenames even if they start with `-`.
 ### Incremental skip cache
 
 After a successful write, or a skip for already-optimal / minimal-gain,
-imgcrush stores a content-hash marker keyed by compression settings under
-the user cache dir (`os.UserCacheDir()/imgcrush`). Subsequent runs with
-matching settings skip those files before decode/encode (`cached`).
+imgcrush records a cascade of markers so later runs can skip work without
+re-reading file contents when possible:
+
+1. **L0 (inode)** — `dev|ino|size|mtime` + settings (Stat only). Survives
+   rename on the same volume; works on iCloud placeholders without download.
+2. **L0b (xattr)** — on-file settlement fingerprint (Darwin/Linux,
+   best-effort). Readable without materializing content.
+3. **L2 (content)** — SHA-256 of file bytes + settings. Checked after a
+   deliberate read; covers copies and cross-volume moves. On hit, L0/xattr
+   are backfilled so the next visit is Stat-only.
+
+Markers live under the user cache dir (`os.UserCacheDir()/imgcrush`).
+Unknown files always proceed to crush (may download from iCloud).
 `--force` bypasses cache reads; `--no-cache` disables read and write.
 Dry-run does not write cache entries.
 
